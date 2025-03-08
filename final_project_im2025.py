@@ -1,5 +1,6 @@
 import os
 import cv2
+import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -19,15 +20,11 @@ dil_kernel = cv2.getStructuringElement(
     cv2.MORPH_ELLIPSE, (dil_kernel_size, dil_kernel_size)
 )
 
-orange = np.array([123, 85, 66], dtype=np.int64)
-light_blue = np.array([60, 76, 101], dtype=np.int64)
-gray = np.array([60, 70, 70], dtype=np.int64)
-green = np.array([93, 111, 70], dtype=np.int64)
-color_values = [orange, light_blue, gray, green]
-color_names = ["red", "blue", "gray", "green"]
-
 
 def clean_image(gray, display=False):
+    if display:
+        display_image(gray, "gray")
+
     gray = cv2.medianBlur(gray, 31)  # blur
     if display:
         display_image(gray, "gray")
@@ -37,11 +34,6 @@ def clean_image(gray, display=False):
         display_image(gray, "gray")
 
     gray = 255 - gray  # inverse
-    if display:
-        display_image(gray, "gray")
-
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(13, 13))
-    gray = clahe.apply(gray)  # clahe
     if display:
         display_image(gray, "gray")
 
@@ -57,7 +49,7 @@ def clean_image(gray, display=False):
     if display:
         display_image(gray, "gray")
 
-    gray = cv2.dilate(gray, dil_kernel, iterations=6)  # dilate
+    gray = cv2.dilate(gray, dil_kernel, iterations=6)
     if display:
         display_image(gray, "gray")
 
@@ -66,6 +58,7 @@ def clean_image(gray, display=False):
 
 def get_circles_from_gray(gray, color=None):
     gray = clean_image(gray)
+    # display_image(gray, "gray")
     circles = cv2.HoughCircles(
         gray,
         cv2.HOUGH_GRADIENT,
@@ -78,11 +71,10 @@ def get_circles_from_gray(gray, color=None):
     )
 
     if circles is None:
-        print("no matches")
         return []
 
     color_img_cpy = np.copy(color)
-    circles = np.uint(np.around(circles))
+    circles = np.int64(np.around(circles))
     circles = circles[0, :]
 
     if color is None:
@@ -91,7 +83,7 @@ def get_circles_from_gray(gray, color=None):
     for circle in circles:
         x, y, r = circle[0], circle[1], circle[2]
         cv2.circle(color_img_cpy, (x, y), r, (255, 255, 255), 15)
-
+    # display_image(color_img_cpy)
     return circles
 
 
@@ -99,9 +91,9 @@ def merge_circle_arr(res, add):
     for circle_new in add:
         x_new, y_new, r_new = circle_new[0], circle_new[1], circle_new[2]
         for old_circle_dict in res:
-            x_old = old_circle_dict["x"]
-            y_old = old_circle_dict["y"]
-            r_old = old_circle_dict["radius"]
+            x_old = np.int64(old_circle_dict["x"])
+            y_old = np.int64(old_circle_dict["y"])
+            r_old = np.int64(old_circle_dict["radius"])
 
             p1 = np.array([x_new, y_new], dtype=np.int64)
             p2 = np.array([x_old, y_old], dtype=np.int64)
@@ -112,17 +104,17 @@ def merge_circle_arr(res, add):
                 y_new = (y_new + y_old) // 2
                 r_new = np.max(np.array([r_new, r_old]))
 
-                old_circle_dict["x"] = x_new
-                old_circle_dict["y"] = y_new
-                old_circle_dict["radius"] = r_new
+                old_circle_dict["x"] = int(x_new)
+                old_circle_dict["y"] = int(y_new)
+                old_circle_dict["radius"] = int(r_new)
                 r_new = -1
                 break
 
         if r_new > 0:
             circle_dict = {}
-            circle_dict["x"] = x_new
-            circle_dict["y"] = y_new
-            circle_dict["radius"] = r_new
+            circle_dict["x"] = int(x_new)
+            circle_dict["y"] = int(y_new)
+            circle_dict["radius"] = int(r_new)
             res.append(circle_dict)
 
 
@@ -148,6 +140,14 @@ def get_colored_circles(color, display=False):
 
     display_image(img_copy)
     return result
+
+
+orange = np.array([123, 85, 66], dtype=np.int64)
+light_blue = np.array([60, 76, 101], dtype=np.int64)
+gray = np.array([60, 70, 70], dtype=np.int64)
+green = np.array([93, 111, 70], dtype=np.int64)
+color_values = [orange, light_blue, gray, green]
+color_names = ["red", "blue", "gray", "green"]
 
 
 def get_color_name(color):
@@ -186,13 +186,15 @@ def track_circles_over_time(img_paths):
         circles_from_images.append(detect_colored_circles(img_path))
 
     result = []
+    circle_amount = 0
     for idx in range(len(circles_from_images)):
         circles = circles_from_images[idx]
-        circle_id = len(result)
         for circle in circles:
             x_new = circle["x"]
             y_new = circle["y"]
 
+            circle_amount += 1
+            circle_id = circle_amount
             for res in result:
                 x_old = res["x"]
                 y_old = res["y"]
@@ -203,18 +205,58 @@ def track_circles_over_time(img_paths):
                 distance = np.linalg.norm(values)
                 if distance < 100:
                     circle_id = res["circle_id"]
+                    circle_amount -= 1
                     break
 
             new_res = {}
-            new_res["image_id"] = idx + 1
-            new_res["circle_id"] = circle_id
-            new_res["x"] = circle["x"]
-            new_res["y"] = circle["y"]
-            new_res["radius"] = circle["radius"]
+            new_res["image_id"] = int(idx + 1)
+            new_res["circle_id"] = int(circle_id)
+            new_res["x"] = int(circle["x"])
+            new_res["y"] = int(circle["y"])
+            new_res["radius"] = int(circle["radius"])
             new_res["color"] = circle["color"]
             result.append(new_res)
 
     return result
+
+
+def show_results(results):
+    df = pd.DataFrame(results)
+
+    pivot_table = df.groupby(["image_id", "color"]).size().unstack(fill_value=0)
+    colors = pivot_table.columns.tolist()
+    pivot_table.plot(kind="bar", stacked=True, figsize=(10, 6), color=colors)
+    plt.title("Distribution of Circle Count by Color per Image")
+    plt.xlabel("Image Number")
+    plt.ylabel("Number of Circles")
+    plt.legend(title="Color")
+    plt.show()
+
+    fig, axes = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+
+    # גרף עבור X center: לכל circle_id יוצרים scatter plot וקו חיבור
+    for cid in df["circle_id"].unique():
+        subset = df[df["circle_id"] == cid]
+        axes[0].scatter(subset["image_id"], subset["x"], label=f"Circle {cid}", s=100)
+        axes[0].plot(subset["image_id"], subset["x"])
+    axes[0].set_title("Trend of Circle X Center by Circle ID")
+    axes[0].set_ylabel("X Coordinate")
+    axes[0].grid(True)
+    axes[0].legend(title="Circle ID")
+
+    # גרף עבור Y center: לכל circle_id יוצרים scatter plot וקו חיבור
+    for cid in df["circle_id"].unique():
+        subset = df[df["circle_id"] == cid]
+        axes[1].scatter(subset["image_id"], subset["y"], label=f"Circle {cid}", s=100)
+        axes[1].plot(subset["image_id"], subset["y"])
+    axes[1].set_title("Trend of Circle Y Center by Circle ID")
+    axes[1].set_xlabel("Image Number")
+    axes[1].set_ylabel("Y Coordinate")
+    axes[1].grid(True)
+    axes[1].legend(title="Circle ID")
+
+    plt.tight_layout()
+    plt.show()
 
 
 current_folder = os.getcwd()
@@ -225,6 +267,26 @@ sequence_2_folder = os.path.join(root_data_folder, "sequence_2")
 sequence_3_folder = os.path.join(root_data_folder, "sequence_3")
 sequence_4_folder = os.path.join(root_data_folder, "sequence_4")
 
-img_lst = os.listdir(sequence_4_folder)
-img_paths = [os.path.join(sequence_1_folder, img_fn) for img_fn in img_lst]
-print(track_circles_over_time(img_paths))
+
+seq_1 = [
+    os.path.join(sequence_1_folder, img_fn) for img_fn in os.listdir(sequence_1_folder)
+]
+seq_2 = [
+    os.path.join(sequence_2_folder, img_fn) for img_fn in os.listdir(sequence_2_folder)
+]
+seq_3 = [
+    os.path.join(sequence_3_folder, img_fn) for img_fn in os.listdir(sequence_3_folder)
+]
+seq_4 = [
+    os.path.join(sequence_4_folder, img_fn) for img_fn in os.listdir(sequence_4_folder)
+]
+
+results_seq_1 = track_circles_over_time(seq_1)
+results_seq_2 = track_circles_over_time(seq_2)
+results_seq_3 = track_circles_over_time(seq_3)
+results_seq_4 = track_circles_over_time(seq_4)
+
+show_results(results_seq_1)
+show_results(results_seq_2)
+show_results(results_seq_3)
+show_results(results_seq_4)
